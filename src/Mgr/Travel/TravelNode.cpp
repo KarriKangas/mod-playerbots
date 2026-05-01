@@ -444,8 +444,6 @@ bool TravelNode::cropUselessLinks()
         TravelNode* farNode = firstLink.first;
         if (this->hasLinkTo(farNode) && this->isUselessLink(farNode))
         {
-            LOG_DEBUG("playerbots", "[CropLink] '{}' → '{}' (dist {:.0f}) — redundant, removing",
-                      getName(), farNode->getName(), getPathTo(farNode)->getDistance());
             this->removeLinkTo(farNode);
             hasRemoved = true;
 
@@ -463,8 +461,6 @@ bool TravelNode::cropUselessLinks()
 
         if (farNode->hasLinkTo(this) && farNode->isUselessLink(this))
         {
-            LOG_DEBUG("playerbots", "[CropLink] '{}' → '{}' (dist {:.0f}) — redundant, removing",
-                      farNode->getName(), getName(), farNode->getPathTo(this)->getDistance());
             farNode->removeLinkTo(this);
             hasRemoved = true;
 
@@ -1097,12 +1093,7 @@ TravelNodeRoute TravelNodeMap::GetNodeRoute(TravelNode* start, TravelNode* goal,
     while (!open.empty())
     {
         if (++nodesExplored > MAX_A_STAR_EXPLORED)
-        {
-            LOG_DEBUG("playerbots",
-                "[TravelNode A*] Exceeded MAX_A_STAR_EXPLORED ({}); truncating route from '{}' to '{}'",
-                MAX_A_STAR_EXPLORED, start->getName(), goal->getName());
             return TravelNodeRoute();
-        }
 
         std::pop_heap(open.begin(), open.end(), heapComp);
         currentNode = open.back();
@@ -1273,7 +1264,7 @@ bool TravelNodeMap::GetFullPath(TravelPlan& plan,
     if (!endNode)
         endNode = GetNearestNodeOnMap(destination);
 
-    if (!startNode || !endNode)
+    if (!startNode || !endNode || startNode == endNode)
         return false;
 
     if (!startNode->hasRouteTo(endNode))
@@ -1283,15 +1274,9 @@ bool TravelNodeMap::GetFullPath(TravelPlan& plan,
     if (route.isEmpty())
         return false;
 
-    // Build flat waypoint path from A* route
     std::vector<WorldPosition> pathToStart = {botPos};
     std::vector<WorldPosition> pathToEnd = {destination};
     plan.steps = route.BuildPath(pathToStart, pathToEnd, nullptr);
-
-    LOG_DEBUG("playerbots",
-        "[TravelPlan] '{}' → '{}', {} points",
-        startNode->getName(), endNode->getName(),
-        plan.steps.size());
 
     return !plan.steps.empty();
 }
@@ -1311,9 +1296,6 @@ bool TravelNodeMap::cropUselessNode(TravelNode* startNode)
         if (node->getNodeMap(true).size() > node->getNodeMap(true, ignore).size())
             return false;
     }
-
-    LOG_INFO("playerbots", "[CropNode] Removing useless node '{}' (map {}, {:.0f},{:.0f},{:.0f}) — no neighbor depends on it",
-             startNode->getName(), startNode->GetMapId(), startNode->getX(), startNode->getY(), startNode->getZ());
 
     removeNode(startNode);
 
@@ -1659,8 +1641,6 @@ void TravelNodeMap::generateWalkPaths()
 
     std::map<uint32, bool> nodeMaps;
 
-    uint32 totalProcessed = 0, totalSkipped = 0;
-
     for (auto& startNode : TravelNodeMap::instance().getNodes())
     {
         nodeMaps[startNode->GetMapId()] = true;
@@ -1668,17 +1648,11 @@ void TravelNodeMap::generateWalkPaths()
 
     for (auto& map : nodeMaps)
     {
-        uint32 mapProcessed = 0, mapSkipped = 0;
         for (auto& startNode : TravelNodeMap::instance().getNodes(WorldPosition(map.first, 1, 1)))
         {
             if (startNode->isLinked())
-            {
-                mapSkipped++;
                 continue;
-            }
 
-            uint32 nearby = 0;
-            uint32 linked = 0;
             for (auto& endNode : TravelNodeMap::instance().getNodes(*startNode->getPosition(), 2000.0f))
             {
                 if (startNode == endNode)
@@ -1690,27 +1664,14 @@ void TravelNodeMap::generateWalkPaths()
                 if (startNode->GetMapId() != endNode->GetMapId())
                     continue;
 
-                nearby++;
                 startNode->BuildPath(endNode, nullptr, false);
-                if (startNode->hasCompletePathTo(endNode))
-                    linked++;
             }
 
-            LOG_INFO("playerbots", "  Node '{}' (map {}): {} nearby, {} linked",
-                     startNode->getName(), startNode->GetMapId(), nearby, linked);
-
             startNode->setLinked(true);
-            mapProcessed++;
         }
-
-        LOG_INFO("playerbots", "[WalkPaths] Map {}: processed {} nodes, skipped {} (already linked)",
-                 map.first, mapProcessed, mapSkipped);
-        totalProcessed += mapProcessed;
-        totalSkipped += mapSkipped;
     }
 
-    LOG_INFO("playerbots", ">> Generated paths for {} nodes ({} processed, {} skipped as already linked).",
-             TravelNodeMap::instance().getNodes().size(), totalProcessed, totalSkipped);
+    LOG_INFO("playerbots", ">> Generated paths for {} nodes.", TravelNodeMap::instance().getNodes().size());
 }
 
 void TravelNodeMap::generateTaxiPaths()
@@ -1764,13 +1725,10 @@ void TravelNodeMap::removeLowNodes()
 {
     std::vector<TravelNode*> goodNodes;
     std::vector<TravelNode*> remNodes;
-    uint32 totalOverworld = 0;
     for (auto& node : TravelNodeMap::instance().getNodes())
     {
         if (!node->getPosition()->isOverworld())
             continue;
-
-        totalOverworld++;
 
         if (std::find(goodNodes.begin(), goodNodes.end(), node) != goodNodes.end())
             continue;
@@ -1781,21 +1739,10 @@ void TravelNodeMap::removeLowNodes()
         std::vector<TravelNode*> nodes = node->getNodeMap(true);
 
         if (nodes.size() < 5)
-        {
-            std::vector<TravelNode*> allInCluster = node->getNodeMap();
-            LOG_INFO("playerbots", "[RemoveLow] Cluster starting at '{}' (map {}) has only {} important nodes, {} total — marking for removal:",
-                     node->getName(), node->GetMapId(), nodes.size(), allInCluster.size());
-            for (auto& rn : allInCluster)
-                LOG_INFO("playerbots", "[RemoveLow]   - '{}' (map {}, {:.0f},{:.0f},{:.0f}) important={}",
-                         rn->getName(), rn->GetMapId(), rn->getX(), rn->getY(), rn->getZ(), rn->isImportant());
             remNodes.insert(remNodes.end(), nodes.begin(), nodes.end());
-        }
         else
             goodNodes.insert(goodNodes.end(), nodes.begin(), nodes.end());
     }
-
-    LOG_INFO("playerbots", "[RemoveLow] {} overworld nodes evaluated, {} good, {} to remove",
-             totalOverworld, goodNodes.size(), remNodes.size());
 
     for (auto& node : remNodes)
         TravelNodeMap::instance().removeNode(node);
@@ -1803,10 +1750,6 @@ void TravelNodeMap::removeLowNodes()
 
 void TravelNodeMap::removeUselessPaths()
 {
-    uint32 linksBefore = 0;
-    for (auto& n : TravelNodeMap::instance().getNodes())
-        linksBefore += n->getLinks()->size();
-
     // Clean up node links
     for (auto& startNode : TravelNodeMap::instance().getNodes())
     {
@@ -1814,7 +1757,7 @@ void TravelNodeMap::removeUselessPaths()
             if (path.second.getComplete() && startNode->hasLinkTo(path.first))
                 ASSERT(true);
     }
-    uint32 it = 0, totalRemoved = 0;
+    uint32 it = 0;
     while (true)
     {
         uint32 rem = 0;
@@ -1829,18 +1772,10 @@ void TravelNodeMap::removeUselessPaths()
             break;
 
         hasToSave = true;
-        totalRemoved += rem;
         it++;
 
-        LOG_INFO("playerbots", "[RemoveUseless] Iteration {}, removed {} links from nodes", it, rem);
+        LOG_INFO("playerbots", "Iteration {}, removed {}", it, rem);
     }
-
-    uint32 linksAfter = 0;
-    for (auto& n : TravelNodeMap::instance().getNodes())
-        linksAfter += n->getLinks()->size();
-
-    LOG_INFO("playerbots", "[RemoveUseless] Done: {} iterations, links {} → {} (removed {})",
-             it, linksBefore, linksAfter, linksBefore - linksAfter);
 }
 
 void TravelNodeMap::calculatePathCosts()
@@ -1866,77 +1801,32 @@ void TravelNodeMap::calculatePathCosts()
 
 void TravelNodeMap::generatePaths(bool fullGen)
 {
-    uint32 totalLinks = 0;
-    uint32 totalPathPoints = 0;
-    for (auto& n : TravelNodeMap::instance().getNodes())
-    {
-        totalLinks += n->getLinks()->size();
-        for (auto& l : *n->getLinks())
-            totalPathPoints += l.second->GetPath().size();
-    }
-    LOG_INFO("playerbots", "[GenPaths] ENTRY (fullGen={}): {} nodes, {} links, {} path points",
-             fullGen, TravelNodeMap::instance().getNodes().size(), totalLinks, totalPathPoints);
-
     LOG_INFO("playerbots", "-Calculating walkable paths");
     generateWalkPaths();
-
-    totalLinks = 0;
-    for (auto& n : TravelNodeMap::instance().getNodes())
-        totalLinks += n->getLinks()->size();
-    LOG_INFO("playerbots", "[GenPaths] After generateWalkPaths: {} nodes, {} links",
-             TravelNodeMap::instance().getNodes().size(), totalLinks);
 
     if (fullGen)
     {
         LOG_INFO("playerbots", "-Removing useless nodes");
         removeLowNodes();
 
-        totalLinks = 0;
-        for (auto& n : TravelNodeMap::instance().getNodes())
-            totalLinks += n->getLinks()->size();
-        LOG_INFO("playerbots", "[GenPaths] After removeLowNodes: {} nodes, {} links",
-                 TravelNodeMap::instance().getNodes().size(), totalLinks);
-
         LOG_INFO("playerbots", "-Removing useless paths");
         removeUselessPaths();
-
-        totalLinks = 0;
-        for (auto& n : TravelNodeMap::instance().getNodes())
-            totalLinks += n->getLinks()->size();
-        LOG_INFO("playerbots", "[GenPaths] After removeUselessPaths: {} nodes, {} links",
-                 TravelNodeMap::instance().getNodes().size(), totalLinks);
     }
-    else
-        LOG_INFO("playerbots", "-Skipping node/path pruning (incremental generation)");
 
     LOG_INFO("playerbots", "-Calculating path costs");
     calculatePathCosts();
     LOG_INFO("playerbots", "-Generating taxi paths");
     generateTaxiPaths();
-
-    totalLinks = 0;
-    totalPathPoints = 0;
-    for (auto& n : TravelNodeMap::instance().getNodes())
-    {
-        totalLinks += n->getLinks()->size();
-        for (auto& l : *n->getLinks())
-            totalPathPoints += l.second->GetPath().size();
-    }
-    LOG_INFO("playerbots", "[GenPaths] EXIT: {} nodes, {} links, {} path points",
-             TravelNodeMap::instance().getNodes().size(), totalLinks, totalPathPoints);
 }
 
 void TravelNodeMap::generateAll()
 {
-    LOG_INFO("playerbots", "[GenerateAll] Regenerating: {} nodes", nodes.size());
-
     generatePaths(false);
     hasToSave = true;
     saveNodeStore();
 
     BuildZoneIndex();
     PrecomputeReachability();
-    LOG_INFO("playerbots", "[GenerateAll] Done: {} nodes, indexes rebuilt.", nodes.size());
 }
 
 void TravelNodeMap::Init()
@@ -1944,18 +1834,13 @@ void TravelNodeMap::Init()
     InitTaxiGraph();
 
     if (!sPlayerbotAIConfig.enableTravelNodes)
-    {
-        LOG_INFO("playerbots", "TravelNodeMap: travel node system disabled via AiPlayerbot.EnableTravelNodes=0 — skipping node load/generate/index.");
         return;
-    }
 
     LoadNodeStore();
     calcMapOffset();
 
     if (hasToGen || hasToFullGen)
     {
-        LOG_INFO("playerbots", "[Init] Generating paths (fullGen={}, {} nodes)...", hasToFullGen, nodes.size());
-
         if (hasToFullGen)
             generateNodes();
 
@@ -2081,10 +1966,7 @@ void TravelNodeMap::printNodeStore()
 void TravelNodeMap::saveNodeStore()
 {
     if (!hasToSave)
-    {
-        LOG_INFO("playerbots", "[SaveNodes] Skipped — hasToSave is false");
         return;
-    }
 
     hasToSave = false;
 
@@ -2146,8 +2028,6 @@ void TravelNodeMap::saveNodeStore()
             paths++;
         }
     }
-    LOG_INFO("playerbots", ">> Saved {} travelNode links.", paths);
-
     // Path points: bulk raw SQL multi-row INSERTs (~500 rows each) instead of
     // 1M+ individual prepared statements.  Appended to the same transaction so
     // ordering is guaranteed.
@@ -2204,7 +2084,7 @@ void TravelNodeMap::saveNodeStore()
 
     flushBatch();
 
-    LOG_INFO("playerbots", ">> Saved {} travelNode path points.", points);
+    LOG_INFO("playerbots", ">> Saved {} travelNode Paths, {} points.", paths, points);
 
     PlayerbotsDatabase.CommitTransaction(trans);
 }
@@ -2214,7 +2094,6 @@ void TravelNodeMap::LoadNodeStore()
     std::string const query = "SELECT id, name, map_id, x, y, z, linked FROM playerbots_travelnode";
 
     std::unordered_map<uint32, TravelNode*> saveNodes;
-    uint32 loadedNodes = 0, loadedLinks = 0, loadedPathPoints = 0;
 
     {
         if (PreparedQueryResult result =
@@ -2231,17 +2110,13 @@ void TravelNodeMap::LoadNodeStore()
                 if (fields[6].Get<bool>())
                     node->setLinked(true);
                 else
-                {
                     hasToGen = true;
-                    LOG_INFO("playerbots", "[LoadNodes] Node '{}' (id={}) is unlinked — will trigger generation",
-                             fields[1].Get<std::string>(), fields[0].Get<uint32>());
-                }
 
                 saveNodes.insert(std::make_pair(fields[0].Get<uint32>(), node));
 
             } while (result->NextRow());
 
-            loadedNodes = saveNodes.size();
+            LOG_INFO("playerbots", ">> Loaded {} travelNodes.", saveNodes.size());
         }
         else
         {
@@ -2276,15 +2151,11 @@ void TravelNodeMap::LoadNodeStore()
                     true);
 
                 if (!fields[7].Get<bool>())
-                {
                     hasToGen = true;
-                    LOG_DEBUG("playerbots", "[LoadNodes] Link {}->{} not calculated — will trigger generation",
-                              fields[0].Get<uint32>(), fields[1].Get<uint32>());
-                }
 
             } while (result->NextRow());
 
-            loadedLinks = result->GetRowCount();
+            LOG_INFO("playerbots", ">> Loaded {} travelNode paths.", result->GetRowCount());
         }
         else
         {
@@ -2325,16 +2196,13 @@ void TravelNodeMap::LoadNodeStore()
 
             } while (result->NextRow());
 
-            loadedPathPoints = result->GetRowCount();
+            LOG_INFO("playerbots", ">> Loaded {} travelNode paths points.", result->GetRowCount());
         }
         else
         {
             LOG_ERROR("playerbots", ">> Error loading travelNode paths.");
         }
     }
-
-    LOG_INFO("playerbots", ">> Loaded travel data: {} nodes, {} links, {} path points.",
-             loadedNodes, loadedLinks, loadedPathPoints);
 }
 
 void TravelNodeMap::calcMapOffset()
@@ -2658,33 +2526,4 @@ void TravelNodeMap::PrecomputeReachability()
                 node->setRouteTo(other);
         }
     }
-
-    uint32 totalNodes = 0;
-    for (auto const& c : components)
-        totalNodes += c.size();
-
-    // Sort components by size descending for logging
-    std::sort(components.begin(), components.end(),
-              [](auto const& a, auto const& b) { return a.size() > b.size(); });
-
-    uint32 singletons = 0;
-    for (auto const& c : components)
-    {
-        if (c.size() == 1)
-            singletons++;
-    }
-
-    std::string topComponents;
-    for (uint32 i = 0; i < std::min<uint32>(3, components.size()); ++i)
-    {
-        auto const& c = components[i];
-        std::string sampleName = c.front() ? c.front()->getName() : "?";
-        if (i > 0)
-            topComponents += ", ";
-        topComponents += sampleName + "(" + std::to_string(c.size()) + ")";
-    }
-
-    LOG_INFO("playerbots",
-             "TravelNodeMap ready: {} nodes, {} zones, {} maps, {} components ({} singletons). Top: {}.",
-             totalNodes, m_zoneIndex.size(), m_mapIndex.size(), components.size(), singletons, topComponents);
 }
