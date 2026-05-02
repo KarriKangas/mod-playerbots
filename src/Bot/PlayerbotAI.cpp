@@ -824,7 +824,7 @@ void PlayerbotAI::HandleTeleportAck()
             bot->StopMoving();
         }
 
-        // simulate far teleport latency (cmangos-style)
+        // simulate far teleport latency
         SetNextCheckDelay(urand(2000, 5000));
         return;
     }
