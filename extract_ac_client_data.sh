@@ -38,7 +38,7 @@ mmapsConfig:
 
     # Maximum slope angle (in degrees) NPCs can walk on.
     # Surfaces steeper than this will be considered unwalkable.
-    walkableSlopeAngle: 50
+    walkableSlopeAngle: 60
 
     # --- Cell Size Calculation ---
     # Many parameters below are defined in "cell units".
