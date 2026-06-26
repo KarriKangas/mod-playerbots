@@ -719,6 +719,11 @@ std::vector<WorldPosition> WorldPosition::getPathStepFrom(WorldPosition startPos
     }
 
     PathGenerator path(pathUnit);
+    // pathUnit may be a temp Creature (when no bot is supplied), which doesn't trip CreateFilter's bot
+    // block, so apply the same bot filter here: hard-exclude steep + lava and cost water, matching the
+    // runtime mover so planned routes stay walkable. Redundant-but-harmless when pathUnit is the bot.
+    path.SetExcludeFlags(NAV_MAGMA | NAV_SLIME | NAV_GROUND_STEEP);
+    path.SetNavTerrainCost(NAV_WATER, 20.0f);
     auto result = getPathStepFrom(startPos, path);
 
     if (tempCreature)
@@ -851,6 +856,11 @@ std::vector<WorldPosition> WorldPosition::getPathFromPath(std::vector<WorldPosit
     }
 
     PathGenerator path(pathUnit);
+    // pathUnit may be a temp Creature (when no bot is supplied), which doesn't trip CreateFilter's bot
+    // block, so apply the same bot filter here: hard-exclude steep + lava and cost water, matching the
+    // runtime mover so planned routes stay walkable.
+    path.SetExcludeFlags(NAV_MAGMA | NAV_SLIME | NAV_GROUND_STEEP);
+    path.SetNavTerrainCost(NAV_WATER, 20.0f);
 
     // Limit the pathfinding attempts
     for (uint32 i = 0; i < maxAttempt; i++)
