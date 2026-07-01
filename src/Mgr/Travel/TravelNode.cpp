@@ -841,7 +841,15 @@ TravelPath TravelNodeRoute::BuildPath(std::vector<WorldPosition> pathToStart, st
     TravelPath travelPath;
 
     if (!pathToStart.empty())  // From start position to start of path.
-        travelPath.addPath(pathToStart, PathNodeType::NODE_PREPATH);
+    {
+        // First point is the position marker the walk executor scans
+        // forward from; the rest are ordinary spline waypoints so a
+        // dense begin leg is batch-dispatched instead of walked one
+        // MoveTo per point.
+        travelPath.addPoint(pathToStart.front(), PathNodeType::NODE_PREPATH);
+        if (pathToStart.size() > 1)
+            travelPath.addPath({pathToStart.begin() + 1, pathToStart.end()}, PathNodeType::NODE_PATH);
+    }
 
     TravelNode* prevNode = nullptr;
     for (auto& node : nodes)
@@ -1284,7 +1292,7 @@ TravelNodeRoute TravelNodeMap::FindRouteNearestNodes(WorldPosition startPos, Wor
 }
 
 bool TravelNodeMap::GetFullPath(TravelPlan& plan,
-    WorldPosition botPos, uint32 botZoneId,
+    WorldPosition botPos, [[maybe_unused]] uint32 botZoneId,
     WorldPosition destination, Unit* bot)
 {
     plan.Reset();
@@ -1293,46 +1301,118 @@ bool TravelNodeMap::GetFullPath(TravelPlan& plan,
     // mmap-probe-first. Run a 40-step chained probe; if it gets within
     // spellDistance of dest, emit it as plan steps and skip the graph
     // entirely (a short walk is always better than a node hop). When
-    // the probe falls short, fall through to graph routing.
+    // the probe falls short, keep it — the route selection below crops
+    // it into the begin leg when it already passes near a start node.
+    std::vector<WorldPosition> beginPath;
     if (botPos.GetMapId() == destination.GetMapId())
     {
-        std::vector<WorldPosition> probe = destination.getPathFromPath({botPos}, bot, 40);
-        if (probe.size() >= 2 && destination.isPathTo(probe, sPlayerbotAIConfig.spellDistance))
+        beginPath = destination.getPathFromPath({botPos}, bot, 40);
+        if (beginPath.size() >= 2 && destination.isPathTo(beginPath, sPlayerbotAIConfig.spellDistance))
         {
             plan.steps.addPoint(botPos, PathNodeType::NODE_PREPATH);
-            for (size_t i = 1; i < probe.size(); ++i)
-                plan.steps.addPoint(probe[i], PathNodeType::NODE_PATH);
+            for (size_t i = 1; i < beginPath.size(); ++i)
+                plan.steps.addPoint(beginPath[i], PathNodeType::NODE_PATH);
             return true;
         }
     }
 
+    Player* botPlayer = bot ? bot->ToPlayer() : nullptr;
+
     std::shared_lock<std::shared_timed_mutex> guard(m_nMapMtx);
 
-    // Find nearest nodes (zone-indexed, fast)
-    TravelNode* startNode = GetNearestNodeInZone(botPos, botZoneId);
-    if (!startNode)
-        startNode = GetNearestNodeOnMap(botPos);
-
-    uint32 destZone = sMapMgr->GetZoneId(PHASEMASK_NORMAL, destination);
-    TravelNode* endNode = GetNearestNodeInZone(destination, destZone);
-    if (!endNode)
-        endNode = GetNearestNodeOnMap(destination);
-
-    if (!startNode || !endNode || startNode == endNode)
+    // Route selection: cycle the closest candidate nodes on both ends
+    // and only accept a route whose begin AND tail legs are proven
+    // walkable. Picking a single nearest node per end skips that proof:
+    // the begin leg may be unreachable (plan aborts mid-flight) and the
+    // tail collapses to one straight node->destination segment that the
+    // walk executor then rejects — the plan dies within arrival range
+    // and gets re-derived forever.
+    std::vector<TravelNode*> startNodes = getNodes(botPos);
+    std::vector<TravelNode*> endNodes = getNodes(destination);
+    if (startNodes.empty() || endNodes.empty())
         return false;
 
-    if (!startNode->hasRouteTo(endNode))
-        return false;
+    // getNodes returns the list distance-sorted; keep the closest few.
+    constexpr size_t MAX_CANDIDATE_NODES = 5;
+    if (startNodes.size() > MAX_CANDIDATE_NODES)
+        startNodes.resize(MAX_CANDIDATE_NODES);
+    if (endNodes.size() > MAX_CANDIDATE_NODES)
+        endNodes.resize(MAX_CANDIDATE_NODES);
 
-    TravelNodeRoute route = GetNodeRoute(startNode, endNode, nullptr);
-    if (route.isEmpty())
-        return false;
+    std::vector<TravelNode*> badStartNodes;
 
-    std::vector<WorldPosition> pathToStart = {botPos};
-    std::vector<WorldPosition> pathToEnd = {destination};
-    plan.steps = route.BuildPath(pathToStart, pathToEnd, nullptr);
+    for (TravelNode* endNode : endNodes)
+    {
+        // Tail leg, computed once per end node and shared by every
+        // start candidate.
+        std::vector<WorldPosition> endPath;
 
-    return !plan.steps.empty();
+        for (TravelNode* startNode : startNodes)
+        {
+            if (startNode == endNode)
+                continue;
+
+            if (std::find(badStartNodes.begin(), badStartNodes.end(), startNode) != badStartNodes.end())
+                continue;
+
+            if (!startNode->hasRouteTo(endNode))
+                continue;
+
+            WorldPosition startNodePosition = *startNode->getPosition();
+            WorldPosition endNodePosition = *endNode->getPosition();
+            float const maxStartDistance = startNode->isTransport() ? 20.0f : 1.0f;
+
+            TravelNodeRoute route = GetNodeRoute(startNode, endNode, botPlayer);
+            if (route.isEmpty())
+                continue;
+
+            if (endPath.empty())
+            {
+                if (botPos.GetMapId() == destination.GetMapId())
+                {
+                    // Same-map travel: the tail must be a live navmesh
+                    // path from the end node to the destination that
+                    // actually arrives; otherwise this end node is
+                    // unusable — move on to the next one.
+                    endPath = endNodePosition.getPathTo(destination, bot);
+                    if (!destination.isPathTo(endPath, 1.0f))
+                    {
+                        endPath.clear();
+                        break;
+                    }
+                }
+                else
+                {
+                    // Cross-map: the bot's map changes mid-plan, so a
+                    // live path can't be computed from here. Leave the
+                    // sparse pair; after the transition the plan gets
+                    // re-derived on the destination map.
+                    endPath = {endNodePosition, destination};
+                }
+            }
+
+            // Begin leg: crop the earlier probe to the start node when
+            // it already passes close enough; otherwise path live. A
+            // start node neither reaches is skipped for every end node.
+            std::vector<WorldPosition> newStartPath = beginPath;
+            bool hasPath = startNodePosition.cropPathTo(newStartPath, maxStartDistance);
+            if (!hasPath)
+            {
+                newStartPath = botPos.getPathTo(startNodePosition, bot);
+                hasPath = startNodePosition.isPathTo(newStartPath, maxStartDistance);
+            }
+            if (!hasPath)
+            {
+                badStartNodes.push_back(startNode);
+                continue;
+            }
+
+            plan.steps = route.BuildPath(newStartPath, endPath, bot);
+            return !plan.steps.empty();
+        }
+    }
+
+    return false;
 }
 
 bool TravelNodeMap::cropUselessNode(TravelNode* startNode)
