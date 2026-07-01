@@ -3230,18 +3230,33 @@ bool MovementAction::RefineWalkPoints(std::vector<G3D::Vector3>& walkPoints)
         // "would walk through walls").
         std::vector<WorldPosition> segPath = bPos.getPathStepFrom(aPos, bot);
 
-        // Travelnode waypoints are authoritative once a plan is
-        // active. When AC mmap can't validate the segment (empty
-        // result, or IsPathCheating rejects a 2-point shortcut /
-        // steep hop), fall back to dispatching the raw (A, B) pair
-        // instead of aborting the plan. Common cases: cmangos
-        // waypoints landing in 1y navmesh gaps from AC extractor
-        // differences, tile-edge artifacts at zone borders.
-        bool const trustRaw = segPath.empty() ||
+        // When the live mmap can't validate the segment (empty result,
+        // or IsPathCheating rejects a 2-point shortcut / steep hop),
+        // decide by the segment's own shape:
+        //   * short and gentle -> trust the raw (A, B) pair. Covers
+        //     offline-baked waypoints landing in small navmesh gaps
+        //     and tile-edge artifacts at zone borders.
+        //   * long or steep -> the bot nav filter is refusing terrain
+        //     the bot must not walk (NAV_GROUND_STEEP starts at
+        //     ~50deg), so abort the plan and let MoveFarTo's probe
+        //     re-derive a route around it.
+        bool const rejected = segPath.empty() ||
                               TravelPath::IsPathCheating(segPath, aPos.distance(bPos));
 
-        if (trustRaw)
+        if (rejected)
         {
+            float const dx = b.x - a.x;
+            float const dy = b.y - a.y;
+            float const dz = b.z - a.z;
+            float const dist2d = std::sqrt(dx * dx + dy * dy);
+            // tan(50deg) ~ 1.19 — the slope band the extractor tags
+            // steep; +2y grace so a ledge step inside a small gap
+            // still passes.
+            bool const gentle = std::fabs(dz) < dist2d * 1.19f + 2.0f;
+            bool const shortSeg = dist2d * dist2d + dz * dz <= 20.0f * 20.0f;
+            if (!shortSeg || !gentle)
+                return false;
+
             if (i == 0)
                 refined.emplace_back(a);
             refined.emplace_back(b);
