@@ -2026,6 +2026,9 @@ TravelPath TravelNodeMap::getFullPath(WorldPosition startPos, WorldPosition endP
         // progress (cross-map, or beginPath is empty). Mirrors mod-cmangosbots' early-return.
         if (beginPath.size() > 1)
         {
+            LOG_DEBUG("playerbots", "[Travel] no node route ({:.0f},{:.0f}) -> ({:.0f},{:.0f}) map {}, following partial probe ({} pts)",
+                      startPos.GetPositionX(), startPos.GetPositionY(), endPos.GetPositionX(), endPos.GetPositionY(),
+                      startPos.GetMapId(), uint32(beginPath.size()));
             return TravelPath(beginPath);
         }
 
@@ -3310,7 +3313,26 @@ TravelNode* TravelNodeMap::GetNearestNodeOnMap(WorldPosition pos)
 
 void TravelNodeMap::PrecomputeReachability()
 {
-    // Find connected components via BFS
+    // Links are one-directional, so a BFS over outgoing links with one
+    // global visited set is order-dependent: a node whose only edge
+    // into the already-visited part of the graph is one-way gets
+    // stranded in a singleton component, and hasRouteTo then rejects
+    // genuinely routable pairs — route selection falls back to raw
+    // probes that walk into terrain the graph would route around.
+    // Compute components over the UNDIRECTED edge closure instead:
+    // false negatives disappear; the occasional false positive (a
+    // one-way-unreachable pair marked routable) is harmless because
+    // the A* itself is the ground truth and returns empty for it.
+    std::unordered_map<TravelNode*, std::vector<TravelNode*>> reverseLinks;
+    for (auto* node : nodes)
+    {
+        if (!node)
+            continue;
+        for (auto const& link : *node->getLinks())
+            if (link.first)
+                reverseLinks[link.first].push_back(node);
+    }
+
     std::unordered_set<TravelNode*> visited;
     std::vector<std::vector<TravelNode*>> components;
 
@@ -3319,7 +3341,7 @@ void TravelNodeMap::PrecomputeReachability()
         if (!node || visited.count(node))
             continue;
 
-        // BFS from this node
+        // BFS from this node, expanding along both edge directions.
         std::vector<TravelNode*> component;
         std::queue<TravelNode*> q;
         q.push(node);
@@ -3338,6 +3360,19 @@ void TravelNodeMap::PrecomputeReachability()
                 {
                     visited.insert(neighbor);
                     q.push(neighbor);
+                }
+            }
+
+            auto revItr = reverseLinks.find(current);
+            if (revItr != reverseLinks.end())
+            {
+                for (TravelNode* neighbor : revItr->second)
+                {
+                    if (neighbor && !visited.count(neighbor))
+                    {
+                        visited.insert(neighbor);
+                        q.push(neighbor);
+                    }
                 }
             }
         }
