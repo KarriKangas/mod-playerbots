@@ -1354,7 +1354,11 @@ TravelPath TravelNodeRoute::buildPath(std::vector<WorldPosition> pathToStart, st
                     WorldPosition prevPos = *prevNode->getPosition();
                     WorldPosition nodePos = *node->getPosition();
                     std::vector<WorldPosition> localLeg = prevPos.getPathTo(nodePos, nullptr);
-                    if (nodePos.isPathTo(localLeg))
+                    // Explicit tolerance: the default falls back to
+                    // targetPosRecalcDistance (0.1y), which no navmesh
+                    // path ever satisfies — the repair would never
+                    // apply and the leg would stay a bare node point.
+                    if (nodePos.isPathTo(localLeg, 2.0f))
                     {
                         returnNodePath = TravelNodePath(prevPos.distance(nodePos));
                         returnNodePath.setPath(localLeg);

@@ -3843,6 +3843,9 @@ void MovementAction::DispatchMovement(TravelPath movePath, bool generatePath, bo
                      bot->IsFlying());
         EmitDebugMove("Dispatch", "movepoint", hopPosition.GetPositionX(), hopPosition.GetPositionY(),
                       hopPosition.GetPositionZ());
+
+        // Wait for the bounded hop, not the full path.
+        size = botPos.distance(hopPosition);
     }
     else
     {
@@ -3853,6 +3856,35 @@ void MovementAction::DispatchMovement(TravelPath movePath, bool generatePath, bo
         pointPath.emplace_back(WorldPosition(bot).getVector3());
         for (auto& p : path)
             pointPath.emplace_back(p.GetPositionX(), p.GetPositionY(), p.GetPositionZ());
+
+        // Density guard: the spline interpolates STRAIGHT between
+        // control points, so an over-long gap (sparse tail, degraded
+        // link, stale cache) would walk the bot through terrain and
+        // air for the whole stretch. Truncate the dispatch at the
+        // first such gap — the bot walks the dense prefix and the
+        // next re-resolution continues from there. Dense sources
+        // space points a few yards apart; 50y is far beyond any
+        // legitimate spacing.
+        constexpr float MAX_SPLINE_SEGMENT = 50.0f;
+        bool truncated = false;
+        for (size_t i = 1; i < pointPath.size(); ++i)
+        {
+            if ((pointPath[i] - pointPath[i - 1]).length() > MAX_SPLINE_SEGMENT)
+            {
+                pointPath.resize(i);
+                truncated = true;
+                break;
+            }
+        }
+        if (pointPath.size() < 2)
+            return;
+        if (truncated)
+        {
+            // Wait for the dispatched prefix, not the full path.
+            size = 0.0f;
+            for (size_t i = 1; i < pointPath.size(); ++i)
+                size += (pointPath[i] - pointPath[i - 1]).length();
+        }
 
         // Use the ALREADY-COMPUTED navmesh path (MoveSplinePath ->
         // EscortMovementGenerator) instead of MovePoint(path.back(),

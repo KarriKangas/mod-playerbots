@@ -1609,16 +1609,30 @@ bool NewRpgBaseAction::RandomChangeStatus(std::vector<NewRpgStatus> candidateSta
         bot->SetStandState(UNIT_STAND_STATE_SIT);
         return true;
     }
-    uint32 rand = urand(1, probSum);
-    uint32 accumulate = 0;
     NewRpgStatus chosenStatus = RPG_STATUS_END;
-    for (NewRpgStatus status : availableStatus)
+
+    // Quest focus: a bot with a doable quest in the log does the quest.
+    // The weighted lottery below otherwise sends it grinding or
+    // wandering into other zones more often than not even with open
+    // quests; the other statuses come back once the log is empty,
+    // finished, or every quest went low-priority.
+    if (sPlayerbotAIConfig.autoDoQuests &&
+        std::find(availableStatus.begin(), availableStatus.end(), RPG_DO_QUEST) != availableStatus.end())
     {
-        accumulate += sPlayerbotAIConfig.RpgStatusProbWeight[status];
-        if (accumulate >= rand)
+        chosenStatus = RPG_DO_QUEST;
+    }
+    else
+    {
+        uint32 rand = urand(1, probSum);
+        uint32 accumulate = 0;
+        for (NewRpgStatus status : availableStatus)
         {
-            chosenStatus = status;
-            break;
+            accumulate += sPlayerbotAIConfig.RpgStatusProbWeight[status];
+            if (accumulate >= rand)
+            {
+                chosenStatus = status;
+                break;
+            }
         }
     }
 
