@@ -1,7 +1,6 @@
 #ifndef PLAYERBOTS_NEWRPGINFO_H
 #define PLAYERBOTS_NEWRPGINFO_H
 
-#include <cfloat>
 #include <deque>
 
 #include "Define.h"
@@ -79,14 +78,6 @@ struct NewRpgInfo
 
     uint32 startT{0};  // start timestamp of the current status
 
-    // MoveFarTo stuck tracking: closest distance reached toward the
-    // current far destination plus how long/often no real progress was
-    // made. Reset by SetMoveFarTo whenever the destination changes.
-    float nearestMoveFarDis{FLT_MAX};
-    uint32 stuckTs{0};
-    uint32 stuckAttempts{0};
-    WorldPosition moveFarPos;
-
     // Travel Node System
     TravelPlan travelPlan;
     bool HasActiveTravelPlan() const { return travelPlan.IsActive(); }
@@ -118,7 +109,6 @@ struct NewRpgInfo
     void ChangeToIdle();
     bool CanChangeTo(NewRpgStatus status);
     void Reset();
-    void SetMoveFarTo(WorldPosition pos);
     std::string ToString();
 };
 

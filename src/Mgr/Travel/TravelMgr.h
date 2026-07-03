@@ -153,6 +153,10 @@ public:
     float fDist(WorldPosition* center);
     float fDist(WorldPosition center) { return fDist(&center); }
 
+    // Projects this point onto segment p1->p2; returns the parametric position
+    // (0 = at p1, 1 = at p2). Returns 0 if the points span different maps or p1 == p2.
+    float projectOnSegment(WorldPosition p1, WorldPosition p2);
+
     template <class T>
     std::pair<T, WorldPosition> closest(std::vector<std::pair<T, WorldPosition>> list)
     {

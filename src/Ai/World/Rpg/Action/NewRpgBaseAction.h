@@ -76,26 +76,6 @@ protected:
     bool SelectRandomFlightTaxiNode(uint32& flightMasterEntry, WorldPosition& flightMasterPos, std::vector<uint32>& path);
     bool RandomChangeStatus(std::vector<NewRpgStatus> candidateStatus);
     bool CheckRpgStatusAvailable(NewRpgStatus status);
-
-    // Time without real progress toward dest before MoveFarTo falls
-    // back to teleport recovery. Short enough that a bot oscillating
-    // around an unreachable destination (non-progressing partial
-    // paths, or a plan that keeps aborting) doesn't spin for minutes;
-    // long enough that a genuine long walk never triggers it.
-    const uint32 stuckTime = 90 * 1000;
-
-private:
-    void StartTravelPlan(WorldPosition dest);
-    bool UpdateTravelPlan();
-
-    // Centralized dispatch helper. Applies underwater fixup, ClipPath
-    // (truncate at first hostile in attack range with LOS, level+5 cap),
-    // inactive-bot teleport (with self-bot carve-out), masterWalking
-    // mode, pre-dispatch state cleanup, then dispatches via
-    // MoveSplinePath and schedules via WaitForReach formula.
-    bool DispatchPathPoints(WorldPosition const& dest,
-                            Movement::PointsArray& points,
-                            char const* label);
 };
 
 #endif

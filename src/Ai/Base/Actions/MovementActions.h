@@ -93,6 +93,53 @@ protected:
     bool GetTravelPlan(TravelPlan& plan, WorldPosition destination);
     bool ExecuteTravelPlan(TravelPlan& state);
 
+    // ---- A->B movement dispatch (long-path routing + cross-continent legs) ----
+    // Orchestrator: validates the endpoint, resolves a full route (node graph
+    // for cross-map / long distance, navmesh otherwise), then either dispatches
+    // a precomputed spline walk or hands off to a special-movement leg.
+    bool MoveTo2(const WorldPosition& endPos, bool idle = false, bool react = false,
+                 bool noPath = false, bool ignoreEnemyTargets = false);
+    // Coordinate forwarding entry. Implemented as a MoveTo2 OVERLOAD (distinct
+    // parameter list) rather than reusing the source name MoveTo(mapId,...):
+    // the existing MoveTo(mapId, x, y, z, normal_only, exact_waypoint, ...) and
+    // NewRpgBaseAction::MoveFarTo(WorldPosition) both already exist, so an
+    // overload of MoveTo2 avoids clobbering / name-hiding either of them.
+    bool MoveTo2(uint32 mapId, float x, float y, float z, bool idle = false,
+                 bool react = false, bool noPath = false, bool ignoreEnemyTargets = false);
+
+    // Routing brain. Reuses the last long path when it still leads to roughly
+    // the same destination; otherwise picks node-graph routing for cross-map /
+    // long-distance and navmesh routing otherwise. Returns an EMPTY path on
+    // pathfinding failure (never fabricates a 1-point path).
+    TravelPath ResolveMovePath(const WorldPosition& startPosition, const WorldPosition& endPosition,
+                               Unit* mover, LastMovement& lastMove);
+    // Plays back the already-computed point path with MoveSplinePath
+    // (usePath=true) to avoid the engine re-generating it and freezing the bot.
+    void DispatchMovement(TravelPath movePath, bool generatePath, bool masterWalking);
+    // Handles the cross-continent legs: static GO portals, area triggers,
+    // transports, flight paths and teleport spells (e.g. hearthstone).
+    bool HandleSpecialMovement(TravelPath& path);
+    // Resolve the controlling unit (the bot, or the vehicle it controls).
+    Unit* GetMover(Player* bot);
+
+    // Flight helpers (free-flying mounts only).
+    bool FlyDirect(const WorldPosition& startPosition, const WorldPosition& endPosition,
+                   WorldPosition& movePosition, TravelPath movePath);
+    void UpdateFlyingState(WorldPosition& movePosition, float totalDistance, float originalZ,
+                           float maxDist, bool isWalking);
+
+    // Cross-continent leg helpers.
+    static bool UseTaxi(PlayerbotAI* botAI, uint32 entry, bool needNpc);
+    static bool MoveOnTransport(PlayerbotAI* botAI, Transport* transport, bool doTeleport);
+    static bool MoveOffTransport(PlayerbotAI* botAI, WorldPosition exitPos, bool doTeleport);
+    static bool UseTransport(PlayerbotAI* botAI, uint32 entry, WorldPosition dockPosition,
+                             WorldPosition exitPosition, bool doTeleport);
+    bool WaitForTransport();
+
+    // Reroute a precomputed point path around known AoE hazards. v1 is a
+    // pass-through (no hazard value wired); see PORT-TODO in the .cpp.
+    bool GeneratePathAvoidingHazards(std::vector<WorldPosition>& movePath);
+
     // Transport boarding helpers (shared by FollowAction and travel plan)
     static Transport* GetTransportForPosTolerant(Map* map, WorldObject* ref,
         uint32 phaseMask, float x, float y, float z);
@@ -318,7 +365,7 @@ public:
         this->intervals = intervals;
         this->clockwise = clockwise;
         this->call_counters = 0;
-        for (uint32 i = 0; i < intervals; i++)
+        for (int i = 0; i < intervals; i++)
         {
             float angle = start_angle + 2 * M_PI * i / intervals;
             waypoints.push_back(std::make_pair(center_x + cos(angle) * radius, center_y + sin(angle) * radius));

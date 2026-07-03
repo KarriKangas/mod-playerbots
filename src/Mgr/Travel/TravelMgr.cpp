@@ -21,6 +21,7 @@
 #include "PathGenerator.h"
 #include "Playerbots.h"
 #include "RaceMgr.h"
+#include "Transport.h"
 #include "TransportMgr.h"
 #include "VMapFactory.h"
 #include "VMapMgr2.h"
@@ -373,6 +374,23 @@ float WorldPosition::fDist(WorldPosition* center)
     return TravelMgr::instance().fastMapTransDistance(*this, *center);
 };
 
+float WorldPosition::projectOnSegment(WorldPosition p1, WorldPosition p2)
+{
+    if (p1.GetMapId() != p2.GetMapId() || p1.GetMapId() != GetMapId())
+        return 0.0f;
+
+    float dx = p2.GetPositionX() - p1.GetPositionX();
+    float dy = p2.GetPositionY() - p1.GetPositionY();
+    float dz = p2.GetPositionZ() - p1.GetPositionZ();
+
+    float lenSq = dx * dx + dy * dy + dz * dz;
+    if (lenSq == 0.0f)
+        return 0.0f; // p1 and p2 are the same point
+
+    return ((GetPositionX() - p1.GetPositionX()) * dx + (GetPositionY() - p1.GetPositionY()) * dy +
+            (GetPositionZ() - p1.GetPositionZ()) * dz) / lenSq;
+}
+
 float mapTransfer::fDist(WorldPosition start, WorldPosition end)
 {
     return start.fDist(pointFrom) + portalLength + pointTo.fDist(end);
@@ -600,23 +618,21 @@ std::string const WorldPosition::getAreaName(bool fullName, bool zoneName)
     return areaName;
 }
 
-std::set<Transport*> WorldPosition::getTransports(uint32 /*entry*/)
+std::set<Transport*> WorldPosition::getTransports(uint32 entry)
 {
-    /*
-    if (!entry)
-        return getMap()->m_transports;
-    else
-    {
-    */
     std::set<Transport*> transports;
-    /*
-    for (auto transport : getMap()->m_transports)
-        if (transport->GetEntry() == entry)
+
+    Map* map = getMap();
+    if (!map)
+        return transports;
+
+    // AC keeps active transports per-map in _transports (the reference
+    // used Map::m_transports). entry == 0 returns every transport on
+    // this map.
+    for (Transport* transport : map->GetAllTransports())
+        if (!entry || transport->GetEntry() == entry)
             transports.insert(transport);
 
-    return transports;
-}
-*/
     return transports;
 }
 
@@ -778,14 +794,11 @@ std::vector<WorldPosition> WorldPosition::getPathStepFrom(WorldPosition startPos
     }
 
     PathGenerator path(pathUnit);
-    // A temp Creature source gets the CREATURE nav filter (steep terrain
-    // included), not the bot one — but every route planned here is walked
-    // by a bot. Re-apply the bot filter so planned paths stay walkable.
-    if (tempCreature)
-    {
-        path.SetExcludeFlags(NAV_MAGMA | NAV_SLIME | NAV_GROUND_STEEP);
-        path.SetNavTerrainCost(NAV_WATER, 20.0f);
-    }
+    // pathUnit may be a temp Creature (when no bot is supplied), which doesn't trip CreateFilter's bot
+    // block, so apply the same bot filter here: hard-exclude steep + lava and cost water, matching the
+    // runtime mover so planned routes stay walkable. Redundant-but-harmless when pathUnit is the bot.
+    path.SetExcludeFlags(NAV_MAGMA | NAV_SLIME | NAV_GROUND_STEEP);
+    path.SetNavTerrainCost(NAV_WATER, 20.0f);
     auto result = getPathStepFrom(startPos, path);
 
     if (tempCreature)
@@ -918,14 +931,10 @@ std::vector<WorldPosition> WorldPosition::getPathFromPath(std::vector<WorldPosit
     }
 
     PathGenerator path(pathUnit);
-    // Same as getPathStepFrom: a temp Creature source would plan with the
-    // creature filter (steep included) — re-apply the bot filter, since
-    // bots are the only consumers of these routes.
-    if (tempCreature)
-    {
-        path.SetExcludeFlags(NAV_MAGMA | NAV_SLIME | NAV_GROUND_STEEP);
-        path.SetNavTerrainCost(NAV_WATER, 20.0f);
-    }
+    // Same as getPathStepFrom: apply the bot nav filter so planned routes
+    // match what bots can actually walk, regardless of the path source.
+    path.SetExcludeFlags(NAV_MAGMA | NAV_SLIME | NAV_GROUND_STEEP);
+    path.SetNavTerrainCost(NAV_WATER, 20.0f);
 
     // Limit the pathfinding attempts
     for (uint32 i = 0; i < maxAttempt; i++)

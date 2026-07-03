@@ -11,10 +11,11 @@
 #include "G3D/Vector3.h"
 #include "TravelMgr.h"
 
+class PlayerbotAI;
+
 // THEORY
 //
-//  Pathfinding in (c)mangos is based on detour recast, an opensource navmesh creation and pathfinding codebase.
-//  This system is used for mob and npc pathfinding and in this codebase also for bots.
+//  Pathfinding uses the detour recast navmesh engine for mob, npc, and bot movement.
 //  Because mobs and npc movement is based on following a player or a set path the PathGenerator is limited to 296y.
 //  This means that when trying to find a path from A to B distances beyond 296y will be a best guess often moving in a
 //  straight path. Bots would get stuck moving from Northshire to Stormwind because there is no 296y path that doesn't
@@ -410,16 +411,19 @@ protected:
 };
 
 // Route step type
+// Ported to cmangos's values (cmangos TravelNode.h:250): value 3 is now
+// NODE_AREA_TRIGGER (was NODE_PORTAL) and value 7 is NODE_STATIC_PORTAL
+// (was NODE_FLYING_MOUNT). The cmangos A->B movement layer consumes these.
 enum class PathNodeType : uint8
 {
     NODE_PREPATH = 0,
     NODE_PATH = 1,
     NODE_NODE = 2,
-    NODE_PORTAL = 3,
+    NODE_AREA_TRIGGER = 3,
     NODE_TRANSPORT = 4,
     NODE_FLIGHTPATH = 5,
     NODE_TELEPORT = 6,
-    NODE_FLYING_MOUNT = 7
+    NODE_STATIC_PORTAL = 7
 };
 
 struct PathNodePoint
@@ -493,16 +497,31 @@ public:
 
     bool makeShortCut(WorldPosition startPos, float maxDist, Unit* bot = nullptr);
 
-    // Detect "pathfinder cheating" — paths that PathGenerator accepts
-    // but a player can't actually walk:
-    //   * a 2-point path for an endpoint distance > 5y means navmesh
-    //     gave up and returned the straight A->B line.
-    //   * a vertical drop > 10y combined with a slope steeper than
-    //     2:1 at either start or end means the pathfinder hopped
-    //     through a near-vertical step the navmesh permits but a
-    //     player wouldn't survive.
-    // cmangos applies the same two checks in TravelNode::buildPath
-    // before caching a node-to-node segment.
+    // cmangos A->B movement layer (ported from cmangos TravelNode.cpp). These
+    // operate on the live fullPath, so they take/return it by reference.
+    // Mutable by-ref accessor used by the cmangos clipping/cutting helpers.
+    std::vector<PathNodePoint>& getPath() { return fullPath; }
+    // Erase everything before (or up to and including) the given point.
+    bool cutTo(PathNodePoint point, bool including);
+    // Decide whether the walker should keep advancing to the next point.
+    bool shouldMoveToNextPoint(WorldPosition startPos,
+                               std::vector<PathNodePoint>::iterator beg,
+                               std::vector<PathNodePoint>::iterator ed,
+                               std::vector<PathNodePoint>::iterator p,
+                               float& moveDist, float maxDist);
+    // Closest reachable next waypoint to move to within maxDist.
+    std::vector<PathNodePoint>::iterator getNextPoint(WorldPosition startPos,
+                                                      float maxDist,
+                                                      bool onTransport);
+    // True when the next leg is a special movement (portal/AT/transport/
+    // flight/teleport); cuts the path to the activation point.
+    bool UpcommingSpecialMovement(WorldPosition startPos, float maxDist,
+                                  bool onTransport);
+    // Clip the path at the first hazard / dangerous enemy / discontinuity.
+    void ClipPath(PlayerbotAI* ai, Unit* mover, bool ignoreEnemyTargets);
+
+    // Reject paths the navmesh accepts but a player can't walk:
+    // 2-point shortcut over 5y, or > 10y vertical drop with slope steeper than 2:1.
     static bool IsPathCheating(std::vector<WorldPosition> const& path,
                                float endpointDistance);
 
@@ -533,6 +552,14 @@ public:
     std::vector<TravelNode*> getNodes() { return nodes; }
 
     TravelPath BuildPath(
+        std::vector<WorldPosition> pathToStart = {},
+        std::vector<WorldPosition> pathToEnd = {},
+        Unit* bot = nullptr);
+
+    // cmangos A->B routing (ported from cmangos TravelNode.cpp:1236). Emits
+    // NODE_AREA_TRIGGER / NODE_STATIC_PORTAL legs the cmangos movement layer
+    // consumes. Coexists with modpb's evolved BuildPath (removed in Phase C).
+    TravelPath buildPath(
         std::vector<WorldPosition> pathToStart = {},
         std::vector<WorldPosition> pathToEnd = {},
         Unit* bot = nullptr);
@@ -672,6 +699,17 @@ public:
     TravelNodeRoute GetNodeRoute(TravelNode* start, TravelNode* goal,
                                  Player* bot);
 
+    // Route selection shared by both resolvers: cycles the closest
+    // candidate nodes on both ends and only accepts a route whose begin
+    // and tail legs are proven walkable. startPath carries the caller's
+    // mmap probe in (crop candidate for the begin leg) and the validated
+    // dense begin leg out; endPath carries the dense tail leg out. Both
+    // are left empty for on-transport routes, which cannot be
+    // walk-validated from a moving deck. Callers hold m_nMapMtx (shared).
+    TravelNodeRoute getRoute(WorldPosition startPos, WorldPosition endPos,
+                             std::vector<WorldPosition>& startPath,
+                             std::vector<WorldPosition>& endPath, Unit* unit = nullptr);
+
     // Picks the nearest start/end nodes for two world positions and runs A*
     // over the node graph to return a full route between them.
     TravelNodeRoute FindRouteNearestNodes(WorldPosition startPos,
@@ -728,6 +766,13 @@ public:
 
     bool GetFullPath(TravelPlan& plan, WorldPosition botPos,
         uint32 botZoneId, WorldPosition destination, Unit* bot = nullptr);
+
+    // cmangos A->B full-path resolver (ported from cmangos TravelNode.cpp:1894).
+    // Returns a flat TravelPath (mmap probe first, then node-graph route). The
+    // cmangos MovementActions dispatch (Phase B) calls this. Coexists with
+    // modpb's GetFullPath/TravelPlan (removed in Phase C).
+    TravelPath getFullPath(WorldPosition startPos, WorldPosition endPos,
+        Unit* unit = nullptr);
 
     // Resolve A* route between two world positions (returns node vector)
     std::vector<TravelNode*> ResolveRoute(WorldPosition startPos,
