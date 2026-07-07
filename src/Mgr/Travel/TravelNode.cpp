@@ -2040,7 +2040,18 @@ TravelPath TravelNodeMap::getFullPath(WorldPosition startPos, WorldPosition endP
     bool reachedByNavmesh = endPos.isPathTo(beginPath, sPlayerbotAIConfig.spellDistance);
 
     if (reachedByNavmesh)  // If we can get within spell distance a longer route won't help.
+    {
+        // Disambiguate the whisper: nodes were deliberately skipped
+        // because the raw probe already reaches within spellDistance.
+        // If a bot still walks into terrain here, the probe FALSELY
+        // reports "reached" (its endpoint is within spellDistance of
+        // the target but on the wrong side of the obstacle) — a
+        // different diagnosis than a failed node route.
+        float const probeGap = beginPath.empty() ? -1.0f : endPos.distance(beginPath.back());
+        s_lastRouteFailReason = "navmesh-reached spellDist (nodes skipped), probeGap=" +
+                                std::to_string((int)probeGap) + " pts=" + std::to_string(beginPath.size());
         return TravelPath(beginPath);
+    }
 
     // [[Node pathfinding system]]
     // Find nodes near the bot and near the end position that have a route between them, then move
