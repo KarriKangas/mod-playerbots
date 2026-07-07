@@ -85,6 +85,15 @@ bool NewRpgBaseAction::MoveWorldObjectTo(ObjectGuid guid, float distance)
         map->GetMapCollisionData().GetMMapData().GetNavMeshQuery();
     float const baseAngle = object->GetAngle(bot);
 
+    // Place the approach ring INSIDE the requested range, not on its edge.
+    // Landing the bot at exactly `distance` leaves it at the very limit of
+    // interaction/loot range (any drift and it's out) and pushes the ring
+    // onto ground farther from the object — more likely a slope edge or by
+    // a wall. Pulling it ~2y inward keeps the bot comfortably in range and
+    // on ground nearer where the object actually stands (so, walkable),
+    // while staying clear of the object's own footprint.
+    float const ringDist = std::max(distance - 2.0f, 2.5f);
+
     for (int pass = 0; pass < 2; ++pass)
     {
         uint16 const includeFlags = (pass == 0) ? NAV_GROUND : (NAV_GROUND | NAV_GROUND_STEEP);
@@ -96,8 +105,8 @@ bool NewRpgBaseAction::MoveWorldObjectTo(ObjectGuid guid, float distance)
              step += static_cast<float>(M_PI) / 4.0f)
         {
             float const angle = baseAngle + step;
-            float x = object->GetPositionX() + std::cos(angle) * distance;
-            float y = object->GetPositionY() + std::sin(angle) * distance;
+            float x = object->GetPositionX() + std::cos(angle) * ringDist;
+            float y = object->GetPositionY() + std::sin(angle) * ringDist;
             float z = object->GetPositionZ();
 
             // LOS check at eye height.
