@@ -104,6 +104,12 @@ bool PlayerbotAIConfig::Initialize()
     aoeRadius = sConfigMgr->GetOption<float>("AiPlayerbot.AoeRadius", 10.0f);
     rpgDistance = sConfigMgr->GetOption<float>("AiPlayerbot.RpgDistance", 200.0f);
     grindDistance = sConfigMgr->GetOption<float>("AiPlayerbot.GrindDistance", 75.0f);
+    // Free-move leash (port of cmangos free-move-range): the radius a bot
+    // may range from its anchor (itself when solo/wandering, its master
+    // when following) to SELECT a grind/attack target. Stops a bot striking
+    // out past nearer mobs toward a distant one or a far camp. 0 disables.
+    wanderMaxDistance = sConfigMgr->GetOption<float>("AiPlayerbot.WanderMaxDistance", 50.0f);
+    guardDistance = sConfigMgr->GetOption<float>("AiPlayerbot.GuardDistance", sightDistance);
     reactDistance = sConfigMgr->GetOption<float>("AiPlayerbot.ReactDistance", 150.0f);
     // Steep-slope travel policy. The core bot nav filter hard-excludes
     // 50-60deg NAV_GROUND_STEEP and cannot re-include it (no

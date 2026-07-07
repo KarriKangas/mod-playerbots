@@ -5418,6 +5418,15 @@ float PlayerbotAI::GetRange(std::string const type)
     if (type == "melee")
         return sPlayerbotAIConfig.meleeDistance;
 
+    if (type == "wandermax")
+        return sPlayerbotAIConfig.wanderMaxDistance;
+
+    if (type == "follow")
+        return sPlayerbotAIConfig.followDistance;
+
+    if (type == "guard")
+        return sPlayerbotAIConfig.guardDistance;
+
     return 0;
 }
 

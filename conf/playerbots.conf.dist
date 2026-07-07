@@ -402,6 +402,20 @@ AiPlayerbot.ContactDistance = 0.45
 AiPlayerbot.AoeRadius = 10
 AiPlayerbot.RpgDistance = 200
 AiPlayerbot.GrindDistance = 75.0
+
+#
+#    AiPlayerbot.WanderMaxDistance
+#        Free-move leash: how far (yards) a bot may range from its anchor to
+#        SELECT a grind/attack target. Anchor is the bot itself when solo, or
+#        its master when following. Keeps a bot from striking out past nearer
+#        mobs toward a distant one / into a far camp. 0 disables the leash.
+#        Default: 50.0
+AiPlayerbot.WanderMaxDistance = 50.0
+
+#
+#    AiPlayerbot.GuardDistance
+#        Free-move leash radius while on a guard position. Default: SightDistance.
+AiPlayerbot.GuardDistance = 100.0
 AiPlayerbot.ReactDistance = 150.0
 
 #
