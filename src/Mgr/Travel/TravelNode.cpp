@@ -2058,6 +2058,12 @@ TravelPath TravelNodeMap::getFullPath(WorldPosition startPos, WorldPosition endP
     // towards/along the route.
     sTravelNodeMap.m_nMapMtx.lock_shared();
 
+    // How far the raw mmap probe reached before node routing — the key
+    // datum for the no-node case (a bot stalling at a ridge foot means
+    // the pure navmesh could not round the obstacle in one resolve).
+    float const rawProbeGap = beginPath.empty() ? -1.0f : endPos.distance(beginPath.back());
+    size_t const rawProbePts = beginPath.size();
+
     // Route selection with validated dense begin AND tail legs (getRoute
     // parity with the reference): candidate node cycling, transport-aware
     // starts, single-node leaf routes and water-surface retries all live
@@ -2066,6 +2072,9 @@ TravelPath TravelNodeMap::getFullPath(WorldPosition startPos, WorldPosition endP
 
     if (route.isEmpty())
     {
+        s_lastRouteFailReason = "rawProbeGap=" + std::to_string((int)rawProbeGap) + "/" +
+                                std::to_string(rawProbePts) + "pts | " + s_lastRouteFailReason;
+
         // modpb's FindRouteNearestNodes creates no temp nodes, so there is nothing to clean up here
         // (cmangos calls route.cleanTempNodes(); modpb's TravelNodeRoute has no tempNodes).
         sTravelNodeMap.m_nMapMtx.unlock_shared();

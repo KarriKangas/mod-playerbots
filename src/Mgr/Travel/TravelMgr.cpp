@@ -932,19 +932,22 @@ std::vector<WorldPosition> WorldPosition::getPathFromPath(std::vector<WorldPosit
 
     PathGenerator path(pathUnit);
     // Same as getPathStepFrom: apply the bot nav filter so planned routes
-    // match what bots can actually walk, regardless of the path source.
+    // match what bots can actually walk, regardless of the path source
+    // (the core filter only hard-excludes steep for a bot source, not a
+    // temp creature). Area costs mirror the reference.
     path.SetExcludeFlags(NAV_MAGMA | NAV_SLIME | NAV_GROUND_STEEP);
-    path.SetNavTerrainCost(NAV_WATER, 20.0f);
+    path.SetNavTerrainCost(NAV_WATER, 10.0f);
 
     // Limit the pathfinding attempts
     for (uint32 i = 0; i < maxAttempt; i++)
     {
-        // Reset cached poly state from the previous step so each call
-        // is a fresh A* (otherwise the prefix-recycling at
-        // PathGenerator.cpp BuildPolyPath snaps the start to the
-        // cached corridor, bending the chain).
-        path.Clear();
-
+        // NB: do NOT Clear() between steps. The reference reuses one
+        // pathfinder across the whole chain so BuildPolyPath's
+        // prefix-recycling EXTENDS the corridor further around an
+        // obstacle each step. Clearing re-plans from scratch toward the
+        // goal every step, which keeps re-hitting the same barrier (a
+        // steep ridge) and never rounds it — the bot walks to the foot
+        // and stalls instead of pathing around.
         subPath = getPathStepFrom(currentPos, path);
 
         if (subPath.empty() || currentPos.distance(&subPath.back()) < sPlayerbotAIConfig.targetPosRecalcDistance)
