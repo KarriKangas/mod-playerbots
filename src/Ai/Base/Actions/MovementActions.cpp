@@ -3965,8 +3965,10 @@ void MovementAction::DispatchMovement(TravelPath movePath, bool generatePath, bo
                 bot->GetTransport()->CalculatePassengerOffset(p.x, p.y, p.z);
         }
 
-        EmitDebugMove("Dispatch", "spline", movePosition.GetPositionX(), movePosition.GetPositionY(),
-                      movePosition.GetPositionZ());
+        // Report the ACTUALLY dispatched endpoint (post-truncation), not
+        // the pre-truncation path end — the step reading overstated
+        // truncated dispatches.
+        EmitDebugMove("Dispatch", "spline", pointPath.back().x, pointPath.back().y, pointPath.back().z);
         mm.MoveSplinePath(&pointPath, moveMode);
     }
 

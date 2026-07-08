@@ -94,21 +94,20 @@ bool NewRpgBaseAction::MoveWorldObjectTo(ObjectGuid guid, float distance)
     // while staying clear of the object's own footprint.
     float const ringDist = std::max(distance - 2.0f, 2.5f);
 
-    // The LOS filter below is a FINAL-APPROACH refinement (don't pick a
-    // point behind a wall/pillar when standing next to the NPC). From
-    // across the zone it is fatal: no point on a ring around an indoor
-    // NPC (Aldrassil trainers) is visible from 200y out, so every angle
-    // fails, no destination is ever produced, MoveFarTo never runs — and
-    // with it the whole travel pipeline including node routing. Far away,
-    // reachability is the pathfinder's job, not a raycast's.
-    bool const applyLosFilter = bot->GetDistance(object) < 40.0f;
-
-    for (int pass = 0; pass < 2; ++pass)
+    // LOS is a PREFERENCE, never a hard reject (reference parity: the
+    // source only biases its angle choice by LOS and always produces a
+    // destination). A giver on another floor occludes every eye-height
+    // ray from below, and with deterministic angles a hard reject wedges
+    // the approach forever — no destination, no MoveFarTo, no node
+    // routing. Pass order: LOS+flat, LOS+steep, noLOS+flat, noLOS+steep.
+    for (int pass = 0; pass < 4; ++pass)
     {
-        uint16 const includeFlags = (pass == 0) ? NAV_GROUND : (NAV_GROUND | NAV_GROUND_STEEP);
-        uint16 const excludeFlags = (pass == 0)
-            ? (NAV_GROUND_STEEP | NAV_WATER | NAV_MAGMA | NAV_SLIME)
-            : (NAV_WATER | NAV_MAGMA | NAV_SLIME);
+        bool const requireLos = pass < 2;
+        bool const allowSteep = (pass % 2) == 1;
+        uint16 const includeFlags = allowSteep ? (NAV_GROUND | NAV_GROUND_STEEP) : NAV_GROUND;
+        uint16 const excludeFlags = allowSteep
+            ? (NAV_WATER | NAV_MAGMA | NAV_SLIME)
+            : (NAV_GROUND_STEEP | NAV_WATER | NAV_MAGMA | NAV_SLIME);
 
         for (float step = 0.0f; step < 2.0f * static_cast<float>(M_PI);
              step += static_cast<float>(M_PI) / 4.0f)
@@ -118,8 +117,8 @@ bool NewRpgBaseAction::MoveWorldObjectTo(ObjectGuid guid, float distance)
             float y = object->GetPositionY() + std::sin(angle) * ringDist;
             float z = object->GetPositionZ();
 
-            // LOS check at eye height (near-range final approach only).
-            if (applyLosFilter && !bot->IsWithinLOS(x, y, z + bot->GetCollisionHeight()))
+            // LOS check at eye height (preference passes only).
+            if (requireLos && !bot->IsWithinLOS(x, y, z + bot->GetCollisionHeight()))
                 continue;
 
             // Navmesh-snap validation (cmangos ClosestCorrectPoint port).

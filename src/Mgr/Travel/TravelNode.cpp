@@ -1075,9 +1075,18 @@ void TravelPath::ClipPath(PlayerbotAI* ai, Unit* mover, bool ignoreEnemyTargets)
 {
     auto startP = getNextPoint(mover, 0.0f, false);
 
+    // Check BEFORE cutTo: erase() invalidates startP, and the stale
+    // iterator compares equal to the new end() exactly when the cut
+    // prefix has as many points as the remainder — the early return
+    // then fired mid-route and the WHOLE remaining path was dispatched
+    // as one unclipped spline (the observed 243y dispatches). Latent in
+    // the reference too; this restores its intended semantics.
+    if (startP == fullPath.end())
+        return;
+
     cutTo(*startP, false);
 
-    if (startP == fullPath.end())
+    if (fullPath.empty())
         return;
 
     // PORT-TODO: cmangos enemy-target + hazard clipping needs symbols absent in
@@ -1985,11 +1994,23 @@ TravelNodeRoute TravelNodeMap::getRoute(WorldPosition startPos, WorldPosition en
     // route ends AT the node (empty tail). Skipped once the bot is
     // already at that node — riding gains nothing then, and the caller's
     // probe/final-approach machinery takes over.
+    // Only ride when the graph materially beats the caller's probe: the
+    // fallback exists for "probe dead-ends far away, nodes reach much
+    // closer". A node that can't end meaningfully closer than the probe
+    // already gets would be backward motion or a self-node loop (a probe
+    // from a node always ends closer than the node itself).
+    float probeGap = 1000000.0f;
+    if (!startPath.empty())
+        probeGap = endPos.distance(startPath.back());
+
     if (startPos.GetMapId() == endPos.GetMapId() &&
         startPos.distance(*endNodes.front()->getPosition()) > 20.0f)
     {
         for (TravelNode* endNode : endNodes)  // distance-sorted: nearest to dest first
         {
+            if (endPos.distance(*endNode->getPosition()) + 10.0f >= probeGap)
+                continue;  // riding can't end meaningfully closer than the probe
+
             for (TravelNode* startNode : startNodes)
             {
                 if (std::find(badStartNodes.begin(), badStartNodes.end(), startNode) != badStartNodes.end())
