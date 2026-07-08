@@ -2060,7 +2060,11 @@ bool TravelNodeMap::GetFullPath(TravelPlan& plan,
         // over a ridge, short-circuiting the node graph — nodes exist to
         // route around exactly those spots.
         beginPath = destination.getPathFromPath({botPos}, bot, 40, /*allowSteepFallback=*/false);
-        if (beginPath.size() >= 2 && destination.isPathTo(beginPath, sPlayerbotAIConfig.spellDistance))
+        // Tight accept (10y, was spellDistance 28.5y): a probe that stops
+        // 20+y short — behind a wall inside a tree trunk, on the wrong
+        // side of a fence — must NOT count as "reached" and skip the node
+        // graph; a genuinely complete path ends within a yard anyway.
+        if (beginPath.size() >= 2 && destination.isPathTo(beginPath, 10.0f))
         {
             plan.steps.addPoint(botPos, PathNodeType::NODE_PREPATH);
             for (size_t i = 1; i < beginPath.size(); ++i)
@@ -2102,7 +2106,11 @@ TravelPath TravelNodeMap::getFullPath(WorldPosition startPos, WorldPosition endP
     // begin/tail legs and short final approaches via getPathTo.
     beginPath = endPos.getPathFromPath({startPos}, unit, 40, /*allowSteepFallback=*/false);
 
-    bool reachedByNavmesh = endPos.isPathTo(beginPath, sPlayerbotAIConfig.spellDistance);
+    // Tight accept (10y, was spellDistance 28.5y): a probe that stops 20+y
+    // short — behind a wall inside a tree trunk — must NOT count as
+    // "reached" and skip the node graph; a complete path ends within a
+    // yard anyway.
+    bool reachedByNavmesh = endPos.isPathTo(beginPath, 10.0f);
 
     if (reachedByNavmesh)  // If we can get within spell distance a longer route won't help.
     {
