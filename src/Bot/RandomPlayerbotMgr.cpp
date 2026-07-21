@@ -1279,7 +1279,13 @@ void RandomPlayerbotMgr::CheckLfgQueue()
                 if (!dungeon)
                     continue;
 
-                LfgDungeons[player->GetTeamId()].push_back(dungeon->id);
+                if (sWorld->getBoolConfig(CONFIG_ALLOW_TWO_SIDE_INTERACTION_GROUP))
+                {
+                    LfgDungeons[TEAM_ALLIANCE].push_back(dungeon->id);
+                    LfgDungeons[TEAM_HORDE].push_back(dungeon->id);
+                }
+                else
+                    LfgDungeons[player->GetTeamId()].push_back(dungeon->id);
             }
         }
     }
