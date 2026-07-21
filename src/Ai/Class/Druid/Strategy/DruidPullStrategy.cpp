@@ -29,8 +29,19 @@ std::string DruidPullStrategy::GetPullActionName() const
 
 std::string DruidPullStrategy::GetPreActionName() const
 {
-    if (GetPullActionName() == "faerie fire")
+    std::string const pullActionName = GetPullActionName();
+    if (pullActionName == "faerie fire")
         return "";
 
-    return PullStrategy::GetPreActionName();
+    Player* bot = botAI->GetBot();
+    if (botAI->HasAnyAuraOf(bot, "bear form", "dire bear form", nullptr))
+        return "";
+
+    if (pullActionName == "faerie fire (feral)" && botAI->HasAura("cat form", bot))
+        return "";
+
+    if (botAI->HasSpell("dire bear form"))
+        return PullStrategy::GetPreActionName();
+
+    return botAI->HasSpell("bear form") ? "bear form" : "";
 }
