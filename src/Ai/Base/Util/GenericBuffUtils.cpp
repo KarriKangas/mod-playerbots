@@ -17,6 +17,8 @@
 #include "Unit.h"
 #include "Value.h"
 
+#include <algorithm>
+
 namespace ai::buff
 {
     namespace
@@ -300,25 +302,32 @@ namespace ai::buff
 
 namespace ai::spell
 {
-    bool HasSpellOrCategoryCooldown(Player* bot, uint32 spellId)
+    uint32 GetSpellOrCategoryCooldownDelay(Player* bot, uint32 spellId)
     {
-        if (bot->HasSpellCooldown(spellId))
-            return true;
+        if (!bot || !spellId)
+            return 0;
+
+        uint32 cooldownDelay = bot->GetSpellCooldownDelay(spellId);
 
         SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellId);
         if (!spellInfo)
-            return false;
+            return cooldownDelay;
 
         uint32 category = spellInfo->GetCategory();
         if (!category)
-            return false;
+            return cooldownDelay;
 
         for (auto const& [cooldownSpellId, cooldown] : bot->GetSpellCooldownMap())
         {
-            if (cooldown.category == category && bot->GetSpellCooldownDelay(cooldownSpellId) > 0)
-                return true;
+            if (cooldown.category == category)
+                cooldownDelay = std::max(cooldownDelay, bot->GetSpellCooldownDelay(cooldownSpellId));
         }
 
-        return false;
+        return cooldownDelay;
+    }
+
+    bool HasSpellOrCategoryCooldown(Player* bot, uint32 spellId)
+    {
+        return GetSpellOrCategoryCooldownDelay(bot, spellId) > 0;
     }
 }

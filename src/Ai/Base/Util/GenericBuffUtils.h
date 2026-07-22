@@ -53,6 +53,7 @@ std::string UpgradeToGroupIfAppropriate(
 
 namespace ai::spell
 {
+    uint32 GetSpellOrCategoryCooldownDelay(Player* bot, uint32 spellId);
     bool HasSpellOrCategoryCooldown(Player* bot, uint32 spellId);
 }
 
